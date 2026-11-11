@@ -30,6 +30,10 @@ on:
         description: Create a GitHub release draft after the platform builds
         type: boolean
         default: false
+      build_run_id:
+        description: Successful Workshop Admin build run to reuse when creating a draft
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -39,6 +43,7 @@ env:
 
 jobs:
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.build_run_id == ''
     name: Workshop Admin / ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -108,44 +113,86 @@ jobs:
     name: Create Workshop Admin release draft
     needs: build
     if: >-
+      always() &&
       github.event_name == 'workflow_dispatch' &&
       inputs.create_release_draft &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      (needs.build.result == 'success' ||
+       (inputs.build_run_id != '' && needs.build.result == 'skipped'))
     runs-on: ubuntu-latest
     concurrency:
       group: workshop-admin-release
       cancel-in-progress: false
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Select the build revision
+        id: build-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        shell: bash
+        run: |
+          target="$GITHUB_SHA"
+          if [[ -n "$BUILD_RUN_ID" ]]; then
+            if [[ ! "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]; then
+              echo "::error::Enter a numeric GitHub Actions run ID."
+              exit 1
+            fi
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID")"
+            jq -e '.conclusion == "success" and
+              .head_branch == "main" and
+              .path == ".github/workflows/release.yml" and
+              .head_repository.full_name == env.GITHUB_REPOSITORY' <<< "$run" >/dev/null
+            target="$(jq -r '.head_sha' <<< "$run")"
+            git fetch --depth=1 origin "$target"
+          fi
+          version="$(git show "$target:pubspec.yaml" | sed -n 's/^version: *//p')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9]+)?$ ]]; then
+            echo "::error::Invalid Workshop Admin version: $version"
+            exit 1
+          fi
+          printf 'target=%s\nversion=%s\n' "$target" "$version" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           pattern: nodeql-workshop-admin-*
           path: artifacts
           merge-multiple: true
-      - name: Generate checksums
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id || github.run_id }}
+      - name: Verify packages and generate checksums
         working-directory: artifacts
         shell: bash
         run: |
+          python3 - <<'PY'
+          import tarfile
+          import zipfile
+
+          with zipfile.ZipFile("nodeql-workshop-admin-macos.zip") as package:
+              assert "nodeql_workshop_admin.app/Contents/MacOS/nodeql_workshop_admin" in package.namelist()
+          with zipfile.ZipFile("nodeql-workshop-admin-windows-x64.zip") as package:
+              assert "nodeql_workshop_admin.exe" in package.namelist()
+              assert "flutter_windows.dll" in package.namelist()
+          with tarfile.open("nodeql-workshop-admin-linux-x64.tar.gz") as package:
+              assert "bundle/nodeql_workshop_admin" in package.getnames()
+          PY
           sha256sum nodeql-workshop-admin-{linux-x64.tar.gz,macos.zip,windows-x64.zip} > SHA256SUMS.txt
       - name: Create or complete the release draft
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TARGET: ${{ steps.build-source.outputs.target }}
+          RELEASE_VERSION: ${{ steps.build-source.outputs.version }}
         shell: bash
         run: |
-          version="$(sed -n 's/^version: *//p' pubspec.yaml)"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9]+)?$ ]]; then
-            echo "::error::Invalid Workshop Admin version: $version"
-            exit 1
-          fi
-          tag="v$version"
+          tag="v$RELEASE_VERSION"
 
           if release="$(gh release view "$tag" --json isDraft,targetCommitish)"; then
             if [[ "$(jq -r '.isDraft' <<< "$release")" != "true" ||
-                  "$(jq -r '.targetCommitish' <<< "$release")" != "$GITHUB_SHA" ]]; then
+                  "$(jq -r '.targetCommitish' <<< "$release")" != "$RELEASE_TARGET" ]]; then
               echo "::error::Release $tag already exists. Bump the Workshop Admin version for a new release."
               exit 1
             fi
@@ -159,6 +206,6 @@ jobs:
             exit 1
           fi
           gh release create "$tag" artifacts/* \
-            --target "$GITHUB_SHA" --draft \
-            --title "NodeQL Workshop Admin $version" \
-            --notes "Downloads für Linux, macOS und Windows. Anleitung und Unterrichtsmaterial: https://kartoffelspalt.github.io/NodeQL-Workshop-Admin/"
+            --target "$RELEASE_TARGET" --draft \
+            --title "NodeQL Workshop Admin $RELEASE_VERSION" \
+            --notes "Pakete für Linux, macOS und Windows sowie SHA-256-Prüfsummen. [Anleitung und Unterrichtsmaterial](https://kartoffelspalt.github.io/NodeQL-Workshop-Admin/#material)"

@@ -32,6 +32,8 @@ und Plattformabhängigkeiten fest.
    `create_release_draft` aktivieren. Der Workflow testet und baut macOS,
    Windows und Linux und legt die Pakete mit `SHA256SUMS.txt` in einem
    gemeinsamen Release-Entwurf ab.
+   Mit `build_run_id` kann ein bereits erfolgreicher Build von `main`
+   übernommen werden. Die Version und der Ziel-Commit stammen aus diesem Lauf.
 3. Versionshinweise und Pakete im Entwurf prüfen und den Release auf GitHub
    veröffentlichen. Die Release-Seite aktualisiert ihre Downloadlinks und den
    Versionsverlauf beim Veröffentlichungsereignis.
