@@ -34,6 +34,9 @@ und Plattformabhängigkeiten fest.
    gemeinsamen Release-Entwurf ab.
    Mit `build_run_id` kann ein bereits erfolgreicher Build von `main`
    übernommen werden. Die Version und der Ziel-Commit stammen aus diesem Lauf.
+   Meldet GitHub beim Anlegen eines Entwurfs HTTP 403, weil sich die Workflows
+   seit dem Build geändert haben, einen Entwurf mit dem Build-Commit als Ziel
+   anlegen und den Lauf wiederholen. Der Workflow ergänzt dann die Dateien.
 3. Versionshinweise und Pakete im Entwurf prüfen und den Release auf GitHub
    veröffentlichen. Die Release-Seite aktualisiert ihre Downloadlinks und den
    Versionsverlauf beim Veröffentlichungsereignis.
