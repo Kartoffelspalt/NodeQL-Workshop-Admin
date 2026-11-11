@@ -74,6 +74,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libsqlite3-dev ninja-build
       - run: flutter pub get
+      - name: Check formatting and analyze
+        if: matrix.platform == 'linux'
+        run: |
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --no-pub
       - run: flutter test --no-pub
       - run: flutter build ${{ matrix.platform }} --release --no-pub
       - name: Package Linux bundle

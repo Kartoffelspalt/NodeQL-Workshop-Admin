@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nodeql/core/app/nodeql_app.dart';
 import 'package:nodeql/engine/block/block_node.dart';
 import 'package:nodeql/features/tutorial/learning_path_authoring.dart';
+import 'package:nodeql/features/tutorial/tutorial_controller.dart';
 import 'package:nodeql/features/tutorial/workshop_admin_extension.dart';
 import 'package:nodeql/features/workbench/presentation/engine/sql_mode.dart';
 import 'package:nodeql/features/workbench/presentation/engine/workspace_engine.dart';
@@ -26,7 +26,22 @@ void main() {
     final directory = Directory.systemTemp.createTempSync(
       'nodeql-inline-studio-',
     );
-    addTearDown(() => directory.deleteSync(recursive: true));
+    addTearDown(() async {
+      for (var attempt = 0; ; attempt++) {
+        try {
+          await directory.delete(recursive: true);
+          return;
+        } on PathAccessException catch (error) {
+          // Windows can hold a just-written file briefly after the test ends.
+          if (!Platform.isWindows ||
+              error.osError?.errorCode != 32 ||
+              attempt == 9) {
+            rethrow;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+        }
+      }
+    });
     const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       pathProvider,
@@ -51,6 +66,13 @@ void main() {
       ProviderScope(
         overrides: [
           learningPathLibraryProvider.overrideWith((_) => library!),
+          tutorialControllerProvider.overrideWith(
+            (_) => TutorialController(
+              storageFile: () async => throw const FileSystemException(
+                'Test progress stays in memory',
+              ),
+            ),
+          ),
           translationControllerProvider.overrideWith(
             (_) => _StudioTranslationController(),
           ),
@@ -168,7 +190,9 @@ void main() {
 class _StudioTranslationController extends TranslationController {
   _StudioTranslationController() : super(FileTranslationRepository()) {
     final decoded =
-        jsonDecode(File('.nodeql/assets/translations/en.json').readAsStringSync())
+        jsonDecode(
+              File('.nodeql/assets/translations/en.json').readAsStringSync(),
+            )
             as Map<String, dynamic>;
     final messages = Map<String, String>.from(decoded['messages'] as Map);
     state = TranslationState(
