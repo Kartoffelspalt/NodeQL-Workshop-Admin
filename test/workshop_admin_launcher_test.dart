@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nodeql/core/app/nodeql_app.dart';
 import 'package:nodeql/engine/block/block_node.dart';
 import 'package:nodeql/features/tutorial/learning_path_authoring.dart';
+import 'package:nodeql/features/tutorial/learning_path_studio.dart';
 import 'package:nodeql/features/tutorial/tutorial_controller.dart';
 import 'package:nodeql/features/tutorial/workshop_admin_extension.dart';
 import 'package:nodeql/features/workbench/presentation/engine/sql_mode.dart';
@@ -18,6 +20,53 @@ import 'package:nodeql/localization/translation_repository.dart';
 import 'package:nodeql_workshop_admin/workshop_admin_launcher.dart';
 
 void main() {
+  testWidgets('library load errors disable editing in Workshop Admin', (
+    tester,
+  ) async {
+    final library = LearningPathLibraryController(
+      storageFile: () async =>
+          throw const FileSystemException('Test workshop library unavailable'),
+      bundledPaths: () async => const [],
+    );
+    await _pumpAdminPanel(tester, library);
+
+    expect(
+      find.text(
+        'The workshop library could not be opened. Your files have not been changed.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('learning-path-create')), findsNothing);
+  });
+
+  testWidgets('reading an import leaves the draft library untouched', (
+    tester,
+  ) async {
+    final picker = _WorkshopPicker();
+    final originalPicker = FilePickerPlatform.instance;
+    FilePickerPlatform.instance = picker;
+    addTearDown(() => FilePickerPlatform.instance = originalPicker);
+    final library = LearningPathLibraryController(
+      enableLocalDrafts: false,
+      bundledPaths: () async => const [],
+    );
+    await _pumpAdminPanel(tester, library);
+    final studio = tester.widget<LearningPathStudioPanel>(
+      find.byType(LearningPathStudioPanel),
+    );
+
+    expect(await studio.onImport!(), isEmpty);
+    picker.file = _WorkshopFile('{"schemaVersion":1,"paths":[false]}');
+    await expectLater(studio.onImport!(), throwsFormatException);
+    picker.file = _WorkshopFile('''
+      {"schemaVersion":1,"paths":[
+        {"id":"imported","title":"Imported workshop","steps":[]}
+      ]}
+    ''');
+    expect((await studio.onImport!()).single.title, 'Imported workshop');
+    expect(library.drafts, isEmpty);
+  });
+
   testWidgets('creates beside the live canvas and restores it after testing', (
     tester,
   ) async {
@@ -151,7 +200,15 @@ void main() {
     expect(find.byKey(const ValueKey('workshop-run-sqlite')), findsOneWidget);
     expect(workspace.findById(select.id), isNull);
     expect(file.existsSync(), isTrue);
-    expect(library!.drafts.single.steps.single.nodes.single.ref, select.id);
+    final draft = library!.drafts.single;
+    expect(draft.steps.single.nodes.single.ref, select.id);
+    expect(
+      scope
+          .read(tutorialControllerProvider)
+          .workshopProgressFor(draft.id)
+          .started,
+      isFalse,
+    );
     await tester.tap(
       find.byKey(const ValueKey('workshop-learning-path-studio')),
     );
@@ -174,6 +231,13 @@ void main() {
     );
     expect(find.text('Choose a table'), findsOneWidget);
     expect(scope.read(sqlModeProvider), SqlAbstractionMode.simple);
+    expect(
+      scope
+          .read(tutorialControllerProvider)
+          .workshopProgressFor(draft.id)
+          .started,
+      isFalse,
+    );
     await tester.runAsync(
       () async => Future<void>.delayed(const Duration(milliseconds: 100)),
     );
@@ -185,6 +249,58 @@ void main() {
       () async => Future<void>.delayed(const Duration(milliseconds: 100)),
     );
   });
+}
+
+Future<void> _pumpAdminPanel(
+  WidgetTester tester,
+  LearningPathLibraryController library,
+) async {
+  await library.initialize();
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        learningPathLibraryProvider.overrideWith((_) => library),
+        translationControllerProvider.overrideWith(
+          (_) => _StudioTranslationController(),
+        ),
+      ],
+      child: MaterialApp(
+        home: Scaffold(body: WorkshopAdminPanel(onStart: (_) async {})),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+class _WorkshopPicker extends FilePickerPlatform {
+  PlatformFile? file;
+
+  @override
+  Future<PlatformFile?> pickFile({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    int compressionQuality = 0,
+    AndroidOptions androidOptions = const AndroidOptions(),
+    DarwinOptions darwinOptions = const DarwinOptions(),
+    WindowsOptions windowsOptions = const WindowsOptions(),
+    LinuxOptions linuxOptions = const LinuxOptions(),
+    WebOptions webOptions = const WebOptions(),
+  }) async => file;
+}
+
+final class _WorkshopFile extends PlatformFile {
+  _WorkshopFile(this.source);
+
+  final String source;
+
+  @override
+  Future<Uint8List> readAsBytes() async => utf8.encode(source);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _StudioTranslationController extends TranslationController {

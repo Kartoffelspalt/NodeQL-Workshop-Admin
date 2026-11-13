@@ -41,57 +41,71 @@ class WorkshopAdminPanel extends ConsumerStatefulWidget {
 }
 
 class _WorkshopAdminPanelState extends ConsumerState<WorkshopAdminPanel> {
-  late final Future<void> _initialization;
   AuthoredLearningPath? _sharing;
-
-  @override
-  void initState() {
-    super.initState();
-    _initialization = ref
-        .read(learningPathLibraryProvider.notifier)
-        .initialize();
-  }
 
   @override
   Widget build(BuildContext context) {
     final catalog = ref.watch(translationControllerProvider).catalog;
     ref.watch(workspaceProvider.select((state) => state.revision));
     final mode = ref.watch(sqlModeProvider);
+    final library = ref.watch(learningPathLibraryProvider);
     final controller = ref.read(learningPathLibraryProvider.notifier);
+    if (library.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (library.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Semantics(
+            liveRegion: true,
+            child: Text(
+              catalog.text('tutorial.studio.libraryLoadFailed'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        ),
+      );
+    }
+    final drafts = controller.drafts.toList(growable: false);
+    final draftIds = drafts.map((path) => path.id).toSet();
     return Stack(
       children: [
-        Offstage(
-          offstage: _sharing != null,
-          child: FutureBuilder<void>(
-            future: _initialization,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              return LearningPathStudioPanel(
-                catalog: catalog,
-                paths: _draftsFirst(controller),
-                workspaceNodes: ref
-                    .read(workspaceProvider.notifier)
-                    .allBlocks(),
-                workspaceMode: mode == SqlAbstractionMode.advanced
-                    ? LearningPathMode.advanced
-                    : LearningPathMode.simple,
-                onHighlightsChanged: (ids) =>
-                    ref
-                            .read(workshopAuthoringHighlightsProvider.notifier)
-                            .state =
-                        ids,
-                onStart: widget.onStart,
-                onSave: controller.save,
-                onDelete: controller.delete,
-                onImport: () => _importBundle(controller),
-                onExport: (_) =>
-                    _saveBundle(controller.exportBundle(), 'workshops.json'),
-                onExportRemote: _exportRemoteBundle,
-                onShareClassroom: (path) => setState(() => _sharing = path),
-              );
-            },
+        ExcludeFocus(
+          excluding: _sharing != null,
+          child: Offstage(
+            offstage: _sharing != null,
+            child: LearningPathStudioPanel(
+              catalog: catalog,
+              paths: [
+                ...drafts,
+                for (final path in library.paths)
+                  if (!draftIds.contains(path.id)) path,
+              ],
+              draftIds: draftIds,
+              workspaceNodes: ref.read(workspaceProvider.notifier).allBlocks(),
+              workspaceMode: mode == SqlAbstractionMode.advanced
+                  ? LearningPathMode.advanced
+                  : LearningPathMode.simple,
+              onHighlightsChanged: (ids) =>
+                  ref.read(workshopAuthoringHighlightsProvider.notifier).state =
+                      ids,
+              onStart: widget.onStart,
+              onSave: controller.save,
+              onDelete: controller.delete,
+              onImport: _importBundle,
+              onImportSave: controller.addDrafts,
+              onExport: (paths) => _saveBundle(
+                encodeLearningPathBundle(paths),
+                'workshops.json',
+                dialogTitle: catalog.text('tutorial.studio.export'),
+              ),
+              onExportRemote: (path) => _exportRemoteBundle(
+                path,
+                dialogTitle: catalog.text('tutorial.download.export'),
+              ),
+              onShareClassroom: (path) => setState(() => _sharing = path),
+            ),
           ),
         ),
         if (_sharing case final path?)
@@ -110,35 +124,21 @@ class _WorkshopAdminPanelState extends ConsumerState<WorkshopAdminPanel> {
     );
   }
 
-  List<AuthoredLearningPath> _draftsFirst(
-    LearningPathLibraryController controller,
-  ) {
-    final drafts = controller.drafts;
-    final draftIds = {for (final draft in drafts) draft.id};
-    return [
-      ...drafts,
-      for (final path in ref.read(learningPathLibraryProvider).paths)
-        if (!draftIds.contains(path.id)) path,
-    ];
-  }
-
-  Future<List<AuthoredLearningPath>> _importBundle(
-    LearningPathLibraryController controller,
-  ) async {
+  Future<List<AuthoredLearningPath>> _importBundle() async {
     final picked = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: const <String>['json'],
     );
-    if (picked != null) {
-      final bundle = utf8.decode(await picked.readAsBytes());
-      await controller.importBundle(bundle);
-    }
-    return _draftsFirst(controller);
+    if (picked == null) return const [];
+
+    return decodeLearningPathDraftBundle(
+      utf8.decode(await picked.readAsBytes()),
+    );
   }
 
   Future<void> _exportRemoteBundle(
     AuthoredLearningPath path, {
-    String? dialogTitle,
+    required String dialogTitle,
   }) async {
     final source = encodeLearningPathBundle([path]);
     validateRemoteWorkshopBundle(source);
@@ -148,10 +148,10 @@ class _WorkshopAdminPanelState extends ConsumerState<WorkshopAdminPanel> {
   Future<void> _saveBundle(
     String source,
     String fileName, {
-    String? dialogTitle,
+    required String dialogTitle,
   }) async {
     await FilePicker.saveFile(
-      dialogTitle: dialogTitle ?? 'Publish NodeQL workshop bundle',
+      dialogTitle: dialogTitle,
       fileName: fileName,
       bytes: utf8.encode(source),
       mimeType: 'application/json',
