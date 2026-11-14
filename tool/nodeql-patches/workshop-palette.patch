@@ -192,8 +192,233 @@ index f12d260defd517002e31f4e493de5202cfbf0b04..ac38c04620cc6afff4358a374f7385c1
        decoded['paths'] is! List) {
      throw const FormatException('Expected a NodeQL workshop bundle.');
    }
+diff --git a/lib/features/tutorial/learning_path_interaction_editor.dart b/lib/features/tutorial/learning_path_interaction_editor.dart
+index 2c25408d93297e2a0f50f7a26d7d107c4ab967e2..ef3007cdcc8eabc7966380bf9e94aacb836ae7fb 100644
+--- a/lib/features/tutorial/learning_path_interaction_editor.dart
++++ b/lib/features/tutorial/learning_path_interaction_editor.dart
+@@ -38,13 +38,18 @@ class LearningPathInteractionEditor extends StatefulWidget {
+ }
+ 
+ class _LearningPathInteractionEditorState
+-    extends State<LearningPathInteractionEditor> {
++    extends State<LearningPathInteractionEditor>
++    with AutomaticKeepAliveClientMixin<LearningPathInteractionEditor> {
+   final _ruleFormKey = GlobalKey();
+   int? _editingRule;
+   TranslationCatalog get catalog => widget.catalog;
+ 
++  @override
++  bool get wantKeepAlive => _editingRule != null;
++
+   void _editRule([int? index]) {
+     setState(() => _editingRule = index ?? widget.requirements.length);
++    updateKeepAlive();
+     widget.onEditingChanged(true);
+     WidgetsBinding.instance.addPostFrameCallback((_) {
+       final target = _ruleFormKey.currentContext;
+@@ -68,107 +73,112 @@ class _LearningPathInteractionEditorState
+     }
+     widget.onRequirementsChanged(next);
+     setState(() => _editingRule = null);
++    updateKeepAlive();
+     widget.onEditingChanged(false);
+   }
+ 
+   @override
+-  Widget build(BuildContext context) => ExpansionTile(
+-    key: const ValueKey('learning-step-interactions'),
+-    tilePadding: EdgeInsets.zero,
+-    title: Text(catalog.text('tutorial.action.title')),
+-    subtitle: Text(
+-      catalog.text('tutorial.action.summary', {
+-        'rules': widget.requirements.length,
+-        'highlights': widget.highlights.length,
+-      }),
+-    ),
+-    expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+-    children: [
+-      if (widget.nodes.isNotEmpty) ...[
+-        Text(catalog.text('tutorial.action.highlight')),
+-        const SizedBox(height: 8),
+-        Wrap(
+-          spacing: 8,
+-          runSpacing: 4,
+-          children: [
+-            for (final node in widget.nodes)
+-              FilterChip(
+-                label: Text(
+-                  widget.nodeLabel(node),
+-                  overflow: TextOverflow.ellipsis,
+-                ),
+-                selected: widget.highlights.contains(node.ref),
+-                onSelected: (_) => widget.onHighlight(node.ref),
+-              ),
+-          ],
+-        ),
+-        const SizedBox(height: 12),
+-      ],
+-      Text(catalog.text('tutorial.action.waitHelp')),
+-      Align(
+-        alignment: AlignmentDirectional.centerStart,
+-        child: TextButton.icon(
+-          key: const ValueKey('workshop-action-add'),
+-          onPressed: _editingRule != null || widget.requirements.length >= 16
+-              ? null
+-              : () => _editRule(),
+-          icon: const Icon(Icons.add),
+-          label: Text(catalog.text('tutorial.action.add')),
+-        ),
++  Widget build(BuildContext context) {
++    super.build(context);
++    return ExpansionTile(
++      key: const ValueKey('learning-step-interactions'),
++      tilePadding: EdgeInsets.zero,
++      title: Text(catalog.text('tutorial.action.title')),
++      subtitle: Text(
++        catalog.text('tutorial.action.summary', {
++          'rules': widget.requirements.length,
++          'highlights': widget.highlights.length,
++        }),
+       ),
+-      if (_editingRule case final index?)
+-        Padding(
+-          key: _ruleFormKey,
+-          padding: const EdgeInsets.symmetric(vertical: 12),
+-          child: _ActionEditor(
+-            key: ValueKey(index),
+-            catalog: catalog,
+-            mode: widget.mode,
+-            nodes: widget.nodes,
+-            nodeLabel: widget.nodeLabel,
+-            initial: index < widget.requirements.length
+-                ? widget.requirements[index]
+-                : null,
+-            onSave: _saveRule,
+-            onCancel: () {
+-              setState(() => _editingRule = null);
+-              widget.onEditingChanged(false);
+-            },
++      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
++      children: [
++        if (widget.nodes.isNotEmpty) ...[
++          Text(catalog.text('tutorial.action.highlight')),
++          const SizedBox(height: 8),
++          Wrap(
++            spacing: 8,
++            runSpacing: 4,
++            children: [
++              for (final node in widget.nodes)
++                FilterChip(
++                  label: Text(
++                    widget.nodeLabel(node),
++                    overflow: TextOverflow.ellipsis,
++                  ),
++                  selected: widget.highlights.contains(node.ref),
++                  onSelected: (_) => widget.onHighlight(node.ref),
++                ),
++            ],
++          ),
++          const SizedBox(height: 12),
++        ],
++        Text(catalog.text('tutorial.action.waitHelp')),
++        Align(
++          alignment: AlignmentDirectional.centerStart,
++          child: TextButton.icon(
++            key: const ValueKey('workshop-action-add'),
++            onPressed: _editingRule != null || widget.requirements.length >= 16
++                ? null
++                : () => _editRule(),
++            icon: const Icon(Icons.add),
++            label: Text(catalog.text('tutorial.action.add')),
+           ),
+         ),
+-      for (var index = 0; index < widget.requirements.length; index++)
+-        ListTile(
+-          contentPadding: EdgeInsets.zero,
+-          title: Text(
+-            learningPathRequirementLabel(
+-              catalog,
+-              widget.requirements[index],
+-              (ref) => widget.nodeLabel(
+-                widget.nodes.firstWhere((node) => node.ref == ref),
+-              ),
++        if (_editingRule case final index?)
++          Padding(
++            key: _ruleFormKey,
++            padding: const EdgeInsets.symmetric(vertical: 12),
++            child: _ActionEditor(
++              key: ValueKey(index),
++              catalog: catalog,
++              mode: widget.mode,
++              nodes: widget.nodes,
++              nodeLabel: widget.nodeLabel,
++              initial: index < widget.requirements.length
++                  ? widget.requirements[index]
++                  : null,
++              onSave: _saveRule,
++              onCancel: () {
++                setState(() => _editingRule = null);
++                updateKeepAlive();
++                widget.onEditingChanged(false);
++              },
+             ),
+           ),
+-          subtitle: widget.requirements[index].value == null
+-              ? null
+-              : Text(
+-                  catalog.text('tutorial.action.expectedSummary', {
+-                    'value': widget.requirements[index].value,
+-                  }),
++        for (var index = 0; index < widget.requirements.length; index++)
++          ListTile(
++            contentPadding: EdgeInsets.zero,
++            title: Text(
++              learningPathRequirementLabel(
++                catalog,
++                widget.requirements[index],
++                (ref) => widget.nodeLabel(
++                  widget.nodes.firstWhere((node) => node.ref == ref),
+                 ),
+-          onTap: _editingRule == null ? () => _editRule(index) : null,
+-          trailing: IconButton(
+-            tooltip: MaterialLocalizations.of(context).deleteButtonTooltip,
+-            icon: const Icon(Icons.close),
+-            onPressed: _editingRule != null
++              ),
++            ),
++            subtitle: widget.requirements[index].value == null
+                 ? null
+-                : () => widget.onRequirementsChanged(
+-                    List<LearningPathRequirement>.of(widget.requirements)
+-                      ..removeAt(index),
++                : Text(
++                    catalog.text('tutorial.action.expectedSummary', {
++                      'value': widget.requirements[index].value,
++                    }),
+                   ),
++            onTap: _editingRule == null ? () => _editRule(index) : null,
++            trailing: IconButton(
++              tooltip: MaterialLocalizations.of(context).deleteButtonTooltip,
++              icon: const Icon(Icons.close),
++              onPressed: _editingRule != null
++                  ? null
++                  : () => widget.onRequirementsChanged(
++                      List<LearningPathRequirement>.of(widget.requirements)
++                        ..removeAt(index),
++                    ),
++            ),
+           ),
+-        ),
+-    ],
+-  );
++      ],
++    );
++  }
+ }
+ 
+ class _ActionEditor extends StatefulWidget {
 diff --git a/lib/features/tutorial/learning_path_studio.dart b/lib/features/tutorial/learning_path_studio.dart
-index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff86753328899 100644
+index 66539cb4788c2285e417271bc2c9e459b50560a5..efffb66774f389b81ae62435def4a562b1945820 100644
 --- a/lib/features/tutorial/learning_path_studio.dart
 +++ b/lib/features/tutorial/learning_path_studio.dart
 @@ -9,6 +9,7 @@ import 'package:nodeql/features/tutorial/learning_path_authoring.dart';
@@ -262,15 +487,17 @@ index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff867
  
    @override
    State<_LearningPathStepEditor> createState() =>
-@@ -664,6 +675,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+@@ -664,7 +675,9 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
    late Set<String> _selectedRefs;
    late final List<LearningPathNodeCallout> _callouts;
    late final Set<String> _highlights;
 +  late final Map<String, LearningPathPaletteCue> _paletteCues;
    late List<LearningPathRequirement> _requirements;
++  late final Set<String> _originalNodeRefs;
    late final String _initialForm;
    bool _editingRule = false;
-@@ -681,6 +693,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+   String? _targetRef;
+@@ -681,6 +694,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
      _hint = TextEditingController(text: initial?.hint ?? '');
      _callouts = List.of(initial?.callouts ?? const <LearningPathNodeCallout>[]);
      _highlights = {...?initial?.highlights};
@@ -278,7 +505,25 @@ index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff867
      _requirements = [...?initial?.requirements];
      final savedStart = initial?.nodes
          .where((node) => node.type == BlockType.eventGreenFlag)
-@@ -708,10 +721,32 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+@@ -696,22 +710,81 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+                 ref: workspaceStart.id,
+                 type: workspaceStart.type,
+               ));
++    final workspaceNodes = _workspaceNodes();
+     _selectNodes(
+       initial?.nodes
+               .where((node) => node.type != BlockType.eventGreenFlag)
+               .toList() ??
+-          _workspaceTemplates(),
++          workspaceNodes.values.map(_workspaceTemplate).toList(),
+     );
++    _originalNodeRefs = {
++      ...workspaceNodes.keys,
++      for (final node in _nodes) node.ref,
++    };
+     _initialForm = _formSnapshot();
+     WidgetsBinding.instance.addPostFrameCallback((_) {
+       if (mounted) {
          widget.onHighlightsChanged?.call(
            _highlights.where(_isInteractionRef).toSet(),
          );
@@ -287,6 +532,38 @@ index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff867
      });
    }
  
++  @override
++  void didUpdateWidget(covariant _LearningPathStepEditor oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (identical(oldWidget.workspaceNodes, widget.workspaceNodes)) return;
++
++    final liveNodes = _workspaceNodes();
++    final knownRefs = {
++      ..._originalNodeRefs,
++      for (final node in _nodes) node.ref,
++    };
++    final added = [
++      for (final node in liveNodes.values)
++        if (!knownRefs.contains(node.id)) _workspaceTemplate(node),
++    ];
++    // Keep the step's existing selections and refresh defaults for new nodes
++    // as they are configured on the canvas.
++    _nodes = [
++      for (final node in _nodes)
++        if (!_originalNodeRefs.contains(node.ref) &&
++            liveNodes.containsKey(node.ref))
++          _workspaceTemplate(liveNodes[node.ref]!)
++        else
++          node,
++      ...added,
++    ];
++    _selectedRefs.addAll(added.map((node) => node.ref));
++    _targetRef ??= _nodes
++        .where((node) => _selectedRefs.contains(node.ref))
++        .firstOrNull
++        ?.ref;
++  }
++
 +  void _publishPaletteEditor() {
 +    widget.onPaletteEditorChanged?.call(
 +      WorkshopPaletteEditor(
@@ -311,7 +588,45 @@ index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff867
    @override
    void dispose() {
      _title.dispose();
-@@ -758,6 +793,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+@@ -722,23 +795,20 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+     super.dispose();
+   }
+ 
+-  List<LearningPathNodeTemplate> _workspaceTemplates() {
+-    final nodes = <String, BlockNode>{
+-      for (final block in widget.workspaceNodes)
+-        for (final node in [block, ...embeddedReporters(block)])
+-          if (node.type != BlockType.eventGreenFlag) node.id: node,
+-    };
+-    return [
+-      for (final node in nodes.values)
+-        LearningPathNodeTemplate(
+-          ref: node.id,
+-          type: node.type,
+-          defaults: learningPathNodeDefaults(node)
+-            ..remove(reporterInputsKey)
+-            ..remove(columnSourceNodeInput),
+-        ),
+-    ];
+-  }
++  Map<String, BlockNode> _workspaceNodes() => {
++    for (final block in widget.workspaceNodes)
++      for (final node in [block, ...embeddedReporters(block)])
++        if (node.type != BlockType.eventGreenFlag) node.id: node,
++  };
++
++  LearningPathNodeTemplate _workspaceTemplate(BlockNode node) =>
++      LearningPathNodeTemplate(
++        ref: node.id,
++        type: node.type,
++        defaults: learningPathNodeDefaults(node)
++          ..remove(reporterInputsKey)
++          ..remove(columnSourceNodeInput),
++      );
+ 
+   bool _isInteractionRef(String ref) =>
+       ref == _startNode?.ref || _selectedRefs.contains(ref);
+@@ -758,6 +828,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
      ],
      _callouts.map((callout) => callout.toJson()).toList(),
      _highlights.toList(),
@@ -319,7 +634,7 @@ index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff867
      _requirements.map((rule) => rule.toJson()).toList(),
    ]);
  
-@@ -867,6 +903,16 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+@@ -867,6 +938,16 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
                  ),
                ),
                const SizedBox(height: 10),
@@ -336,7 +651,28 @@ index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff867
                ExpansionTile(
                  tilePadding: EdgeInsets.zero,
                  title: Text(catalog.text('tutorial.studio.hint')),
-@@ -1123,6 +1169,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+@@ -924,7 +1005,11 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+                     onPressed: _editingRule
+                         ? null
+                         : () => setState(() {
+-                            _selectNodes(_workspaceTemplates());
++                            _selectNodes(
++                              _workspaceNodes().values
++                                  .map(_workspaceTemplate)
++                                  .toList(),
++                            );
+                             widget.onHighlightsChanged?.call(
+                               _highlights.where(_isInteractionRef).toSet(),
+                             );
+@@ -936,6 +1021,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+                   ),
+                 ),
+               LearningPathInteractionEditor(
++                key: const ValueKey('learning-step-interaction-editor'),
+                 catalog: catalog,
+                 onEditingChanged: (editing) =>
+                     setState(() => _editingRule = editing),
+@@ -1123,6 +1209,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
            _callouts.where((callout) => _isInteractionRef(callout.targetRef)),
          ),
          highlights: List.unmodifiable(_highlights.where(_isInteractionRef)),
@@ -377,7 +713,7 @@ index 29d083687e868909d8cc4f4cf70bffd52b4aaefd..5e7c09cc4c295132e7b1b72aa62c6dad
 +      onEditorChanged != oldWidget.onEditorChanged;
 +}
 diff --git a/lib/features/workbench/presentation/workbench_page.dart b/lib/features/workbench/presentation/workbench_page.dart
-index 0e2c75ab3491803aed385f6dae0d173a1eaa5dd4..deb7a167015389a7be442d0e36ff443bfc9e8665 100644
+index 0e2c75ab3491803aed385f6dae0d173a1eaa5dd4..2df1853882bbc8626f0fd3a9f911829825f162eb 100644
 --- a/lib/features/workbench/presentation/workbench_page.dart
 +++ b/lib/features/workbench/presentation/workbench_page.dart
 @@ -22,6 +22,7 @@ import 'package:nodeql/features/workbench/presentation/engine/sql_compiler.dart'
@@ -930,6 +1266,128 @@ index 0e2c75ab3491803aed385f6dae0d173a1eaa5dd4..deb7a167015389a7be442d0e36ff443b
    }
  
    double _palettePreviewWidth(String label, double cardWidth) {
+@@ -9879,7 +9925,7 @@ class _NodeView extends ConsumerWidget {
+     if (_isDropdownToken(rawToken, mappedKey)) {
+       final picked = await _pickInlineOptionOverlay(
+         context: context,
+-        nodeId: node.id,
++        node: node,
+         options: options,
+         anchorGlobal: anchorGlobal,
+         localeCode: localeCode,
+@@ -9890,7 +9936,9 @@ class _NodeView extends ConsumerWidget {
+           localeCode: localeCode,
+         ),
+       );
+-      if (picked != null) {
++      if (picked != null &&
++          context.mounted &&
++          identical(engine.findAnyNodeById(node.id), node)) {
+         if (mappedKey == 'columns') {
+           final current = '${node.inputs[mappedKey] ?? ''}';
+           if (picked.startsWith('__REMOVE__:')) {
+@@ -10720,7 +10768,7 @@ class _NodeView extends ConsumerWidget {
+ 
+   Future<String?> _pickInlineOptionOverlay({
+     required BuildContext context,
+-    required String nodeId,
++    required BlockNode node,
+     required List<String> options,
+     required Offset anchorGlobal,
+     required String localeCode,
+@@ -10738,40 +10786,38 @@ class _NodeView extends ConsumerWidget {
+       final activeEntry = entry;
+       entry = null;
+       activeEntry?.remove();
++      activeEntry?.dispose();
+       if (!completer.isCompleted) completer.complete(value);
+-      textController.dispose();
++      WidgetsBinding.instance.addPostFrameCallback(
++        (_) => textController.dispose(),
++      );
+     }
+ 
++    final workspaceScope = ProviderScope.containerOf(context, listen: false);
++    if (!identical(
++      workspaceScope.read(workspaceProvider.notifier).findAnyNodeById(node.id),
++      node,
++    )) {
++      textController.dispose();
++      return null;
++    }
+     final maxHeight = MediaQuery.of(context).size.height * 0.4;
+     final overlayWidth = options.any(_isJoinOption) ? 340.0 : 240.0;
+     final overlay = Overlay.of(context, rootOverlay: true);
+     final overlayBox = overlay.context.findRenderObject() as RenderBox;
+     final anchor = overlayBox.globalToLocal(anchorGlobal);
++    final left = _clampOverlayLeft(
++      context,
++      anchor.dx - overlayWidth / 2,
++      overlayWidth,
++    );
++    final top = _clampOverlayTop(context, anchor.dy + 8, maxHeight);
+     final workbenchColors = NodeQlWorkbenchColors.of(context);
+     final surfaceStyle = NodeQlSurfaceStyle.of(context);
+     final foreground = Theme.of(context).colorScheme.onSurface;
+-    final openedRevision = ProviderScope.containerOf(
+-      context,
+-      listen: false,
+-    ).read(workspaceProvider).revision;
+     entry = OverlayEntry(
+       builder: (ctx) => Stack(
+         children: [
+-          Consumer(
+-            builder: (context, ref, _) {
+-              final revision = ref.watch(
+-                workspaceProvider.select((state) => state.revision),
+-              );
+-              if (revision != openedRevision ||
+-                  ref
+-                          .read(workspaceProvider.notifier)
+-                          .findAnyNodeById(nodeId) ==
+-                      null) {
+-                WidgetsBinding.instance.addPostFrameCallback((_) => close());
+-              }
+-              return const SizedBox.shrink();
+-            },
+-          ),
+           Positioned.fill(
+             child: GestureDetector(
+               behavior: HitTestBehavior.translucent,
+@@ -10779,12 +10825,8 @@ class _NodeView extends ConsumerWidget {
+             ),
+           ),
+           Positioned(
+-            left: _clampOverlayLeft(
+-              context,
+-              anchor.dx - overlayWidth / 2,
+-              overlayWidth,
+-            ),
+-            top: _clampOverlayTop(context, anchor.dy + 8, maxHeight),
++            left: left,
++            top: top,
+             child: Material(
+               color: Colors.transparent,
+               child: Container(
+@@ -10962,8 +11004,17 @@ class _NodeView extends ConsumerWidget {
+       ),
+     );
+ 
++    // The root overlay is outside the Workshop's workspace override.
++    final subscription = workspaceScope.listen(
++      workspaceProvider.select((state) => state.revision),
++      (_, _) => close(),
++    );
+     overlay.insert(entry!);
+-    return completer.future;
++    try {
++      return await completer.future;
++    } finally {
++      subscription.close();
++    }
+   }
+ 
+   double _clampOverlayLeft(BuildContext context, double x, double width) {
 diff --git a/lib/localization/translation_controller.dart b/lib/localization/translation_controller.dart
 index 673257e3246df1b0903b42cf0712b30240a2f749..57e2ff119905eb04068bde4616f68b39c778cf7d 100644
 --- a/lib/localization/translation_controller.dart
