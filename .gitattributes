@@ -1,2 +1,3 @@
 *.pdf binary
 *.webp binary
+tool/nodeql-patches/*.patch text eol=lf

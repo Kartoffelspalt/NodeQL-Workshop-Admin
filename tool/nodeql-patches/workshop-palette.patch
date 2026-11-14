@@ -1,0 +1,1053 @@
+diff --git a/assets/translations/en.json b/assets/translations/en.json
+index b8134af22ccae3ecf297da28e8d7468370180024..0672f2a45e44d6c9c8dd76375240fc25d874bde1 100644
+--- a/assets/translations/en.json
++++ b/assets/translations/en.json
+@@ -457,6 +457,11 @@
+     "tutorial.studio.stepHelp": "What should the class do in this step?",
+     "tutorial.studio.instructionExample": "e.g. Show all customers from Berlin.",
+     "tutorial.studio.hintLabel": "Hint for the class",
++    "tutorial.studio.paletteHelp": "Use the menu on a card in the left palette to mark or focus it ({count} marked).",
++    "tutorial.studio.paletteEdit": "Workshop marker for {node}",
++    "tutorial.studio.paletteNone": "No marker",
++    "tutorial.studio.paletteHighlight": "Highlight",
++    "tutorial.studio.paletteFocus": "Focus",
+     "tutorial.studio.practiceNodes": "Practice nodes",
+     "tutorial.studio.useWorkspaceNodes": "Use current workspace nodes",
+     "tutorial.studio.explainNodes": "Node labels (optional)",
+diff --git a/lib/features/tutorial/learning_path_authoring.dart b/lib/features/tutorial/learning_path_authoring.dart
+index f12d260defd517002e31f4e493de5202cfbf0b04..ac38c04620cc6afff4358a374f7385c1be21c007 100644
+--- a/lib/features/tutorial/learning_path_authoring.dart
++++ b/lib/features/tutorial/learning_path_authoring.dart
+@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
+ import 'package:flutter/services.dart';
+ import 'package:flutter_riverpod/legacy.dart';
+ import 'package:nodeql/engine/block/block_node.dart';
++import 'package:nodeql/features/workbench/presentation/engine/sql_palette_catalog.dart';
+ 
+ enum LearningPathCalloutSide { left, right }
+ 
+@@ -16,6 +17,29 @@ enum LearningPathCalloutSide { left, right }
+ /// field was introduced remain fully compatible.
+ enum LearningPathMode { simple, advanced }
+ 
++enum LearningPathPaletteCue { highlight, focus }
++
++Map<String, LearningPathPaletteCue> decodeLearningPathPaletteCues(
++  Object? value,
++) {
++  if (value == null) return const {};
++  if (value is! Map) {
++    throw const FormatException('Invalid workshop palette cues.');
++  }
++  final cues = <String, LearningPathPaletteCue>{};
++  for (final entry in value.entries) {
++    final key = entry.key;
++    final cue = LearningPathPaletteCue.values
++        .where((cue) => cue.name == entry.value)
++        .firstOrNull;
++    if (key is! String || !sqlPaletteCardKeys.contains(key) || cue == null) {
++      throw const FormatException('Invalid workshop palette cue.');
++    }
++    cues[key] = cue;
++  }
++  return Map.unmodifiable(cues);
++}
++
+ enum LearningPathAction {
+   selectNode,
+   enterInput,
+@@ -151,6 +175,7 @@ class LearningPathStep {
+     this.nodes = const <LearningPathNodeTemplate>[],
+     this.callouts = const <LearningPathNodeCallout>[],
+     this.highlights = const <String>[],
++    this.paletteCues = const <String, LearningPathPaletteCue>{},
+     this.requirements = const <LearningPathRequirement>[],
+   });
+ 
+@@ -162,20 +187,24 @@ class LearningPathStep {
+   final List<LearningPathNodeTemplate> nodes;
+   final List<LearningPathNodeCallout> callouts;
+   final List<String> highlights;
++  final Map<String, LearningPathPaletteCue> paletteCues;
+   final List<LearningPathRequirement> requirements;
+ 
+-  Map<String, dynamic> toJson() => <String, dynamic>{
+-    'id': id,
+-    'title': title,
+-    'instruction': instruction,
+-    'hint': hint,
+-    'mode': mode.name,
+-    'nodes': nodes.map((node) => node.toJson()).toList(),
+-    'callouts': callouts.map((callout) => callout.toJson()).toList(),
+-    if (highlights.isNotEmpty) 'highlights': highlights,
+-    if (requirements.isNotEmpty)
+-      'requirements': requirements.map((rule) => rule.toJson()).toList(),
+-  };
++  Map<String, dynamic> toJson({bool includePaletteCues = false}) =>
++      <String, dynamic>{
++        'id': id,
++        'title': title,
++        'instruction': instruction,
++        'hint': hint,
++        'mode': mode.name,
++        'nodes': nodes.map((node) => node.toJson()).toList(),
++        'callouts': callouts.map((callout) => callout.toJson()).toList(),
++        if (highlights.isNotEmpty) 'highlights': highlights,
++        if (includePaletteCues && paletteCues.isNotEmpty)
++          'paletteCues': paletteCues.map((key, cue) => MapEntry(key, cue.name)),
++        if (requirements.isNotEmpty)
++          'requirements': requirements.map((rule) => rule.toJson()).toList(),
++      };
+ 
+   factory LearningPathStep.fromJson(Map<String, dynamic> json) {
+     return LearningPathStep(
+@@ -204,6 +233,7 @@ class LearningPathStep {
+           )
+           .toList(growable: false),
+       highlights: List<String>.from(json['highlights'] as List? ?? const []),
++      paletteCues: decodeLearningPathPaletteCues(json['paletteCues']),
+       requirements: [
+         for (final rule in json['requirements'] as List? ?? const [])
+           LearningPathRequirement.fromJson(
+@@ -245,12 +275,15 @@ class AuthoredLearningPath {
+   int get calloutCount =>
+       steps.fold<int>(0, (count, step) => count + step.callouts.length);
+ 
+-  Map<String, dynamic> toJson() => <String, dynamic>{
+-    'id': id,
+-    'title': _bundleTextJson(title, titleTranslations),
+-    'description': _bundleTextJson(description, descriptionTranslations),
+-    'steps': steps.map((step) => step.toJson()).toList(),
+-  };
++  Map<String, dynamic> toJson({bool includePaletteCues = false}) =>
++      <String, dynamic>{
++        'id': id,
++        'title': _bundleTextJson(title, titleTranslations),
++        'description': _bundleTextJson(description, descriptionTranslations),
++        'steps': steps
++            .map((step) => step.toJson(includePaletteCues: includePaletteCues))
++            .toList(),
++      };
+ 
+   factory AuthoredLearningPath.fromJson(Map<String, dynamic> json) {
+     final title = _decodeBundleText(json['title']);
+@@ -425,7 +458,8 @@ class LearningPathLibraryController
+     });
+   }
+ 
+-  String exportBundle() => encodeLearningPathBundle(state.paths);
++  String exportBundle() =>
++      encodeLearningPathBundle(state.paths, includePaletteCues: true);
+ 
+   Future<void> _persist(List<AuthoredLearningPath> Function() update) {
+     final storageFile = _storageFile;
+@@ -439,7 +473,10 @@ class LearningPathLibraryController
+       final staging = await file.parent.createTemp('.nodeql-workshops-');
+       try {
+         final draft = fileAt('${staging.path}/paths.json');
+-        await draft.writeAsString(encodeLearningPathBundle(paths), flush: true);
++        await draft.writeAsString(
++          encodeLearningPathBundle(paths, includePaletteCues: true),
++          flush: true,
++        );
+         await draft.rename(file.path);
+       } finally {
+         try {
+@@ -498,16 +535,22 @@ class LearningPathLibraryController
+   }
+ }
+ 
+-String encodeLearningPathBundle(Iterable<AuthoredLearningPath> paths) {
++String encodeLearningPathBundle(
++  Iterable<AuthoredLearningPath> paths, {
++  bool includePaletteCues = false,
++}) {
+   final workshops = paths.toList(growable: false);
+-  final hasInteractions = workshops.any(
+-    (path) => path.steps.any(
+-      (step) => step.highlights.isNotEmpty || step.requirements.isNotEmpty,
+-    ),
++  final steps = workshops.expand((path) => path.steps);
++  final hasPaletteCues =
++      includePaletteCues && steps.any((step) => step.paletteCues.isNotEmpty);
++  final hasInteractions = steps.any(
++    (step) => step.highlights.isNotEmpty || step.requirements.isNotEmpty,
+   );
+   return const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+-    'schemaVersion': hasInteractions ? 2 : 1,
+-    'paths': workshops.map((path) => path.toJson()).toList(),
++    'schemaVersion': hasPaletteCues ? 3 : (hasInteractions ? 2 : 1),
++    'paths': workshops
++        .map((path) => path.toJson(includePaletteCues: includePaletteCues))
++        .toList(),
+   });
+ }
+ 
+@@ -529,7 +572,7 @@ List<AuthoredLearningPath> decodeLearningPathDraftBundle(String source) {
+   final decoded = jsonDecode(source);
+   if (decoded is! Map ||
+       decoded['schemaVersion'] is! int ||
+-      (decoded['schemaVersion'] != 1 && decoded['schemaVersion'] != 2) ||
++      !const {1, 2, 3}.contains(decoded['schemaVersion']) ||
+       decoded['paths'] is! List) {
+     throw const FormatException('Expected a NodeQL workshop bundle.');
+   }
+diff --git a/lib/features/tutorial/learning_path_studio.dart b/lib/features/tutorial/learning_path_studio.dart
+index 66539cb4788c2285e417271bc2c9e459b50560a5..bc1a3efbdfb00455261e6a50202ff86753328899 100644
+--- a/lib/features/tutorial/learning_path_studio.dart
++++ b/lib/features/tutorial/learning_path_studio.dart
+@@ -9,6 +9,7 @@ import 'package:nodeql/features/tutorial/learning_path_authoring.dart';
+ import 'package:nodeql/features/tutorial/learning_path_interaction_editor.dart';
+ import 'package:nodeql/features/tutorial/learning_path_review.dart';
+ import 'package:nodeql/features/tutorial/learning_path_studio_library.dart';
++import 'package:nodeql/features/tutorial/workshop_admin_extension.dart';
+ 
+ import 'package:nodeql/features/workbench/presentation/engine/sql_labels.dart';
+ import 'package:nodeql/features/workbench/presentation/engine/sql_mode.dart';
+@@ -149,6 +150,9 @@ class _LearningPathStudioPanelState extends State<LearningPathStudioPanel> {
+               workspaceNodes: widget.workspaceNodes,
+               workspaceMode: widget.workspaceMode,
+               onHighlightsChanged: widget.onHighlightsChanged,
++              onPaletteEditorChanged: WorkshopPaletteEditingScope.maybeOf(
++                context,
++              )?.onEditorChanged,
+               onCancel: () => setState(() => _editing = null),
+               onSave: (next) async {
+                 await widget.onSave(next);
+@@ -283,6 +287,7 @@ class _LearningPathEditor extends StatefulWidget {
+     required this.workspaceNodes,
+     required this.workspaceMode,
+     required this.onHighlightsChanged,
++    required this.onPaletteEditorChanged,
+     required this.onCancel,
+     required this.onSave,
+     required this.onPreview,
+@@ -294,6 +299,7 @@ class _LearningPathEditor extends StatefulWidget {
+   final List<BlockNode> workspaceNodes;
+   final LearningPathMode workspaceMode;
+   final ValueChanged<Set<String>>? onHighlightsChanged;
++  final ValueChanged<WorkshopPaletteEditor?>? onPaletteEditorChanged;
+   final VoidCallback onCancel;
+   final Future<void> Function(AuthoredLearningPath path) onSave;
+   final Future<void> Function(AuthoredLearningPath path) onPreview;
+@@ -340,12 +346,15 @@ class _LearningPathEditorState extends State<_LearningPathEditor> {
+         stepNumber: editingStep + 1,
+         initialStep: editingStep < _steps.length ? _steps[editingStep] : null,
+         onHighlightsChanged: widget.onHighlightsChanged,
++        onPaletteEditorChanged: widget.onPaletteEditorChanged,
+         onCancel: () {
+           widget.onHighlightsChanged?.call({});
++          widget.onPaletteEditorChanged?.call(null);
+           setState(() => _editingStep = null);
+         },
+         onSave: (step) {
+           widget.onHighlightsChanged?.call({});
++          widget.onPaletteEditorChanged?.call(null);
+           setState(() {
+             if (editingStep == _steps.length) {
+               _steps.add(step);
+@@ -636,6 +645,7 @@ class _LearningPathStepEditor extends StatefulWidget {
+     required this.onSave,
+     required this.onCancel,
+     this.onHighlightsChanged,
++    this.onPaletteEditorChanged,
+     this.initialStep,
+   });
+ 
+@@ -647,6 +657,7 @@ class _LearningPathStepEditor extends StatefulWidget {
+   final ValueChanged<LearningPathStep> onSave;
+   final VoidCallback onCancel;
+   final ValueChanged<Set<String>>? onHighlightsChanged;
++  final ValueChanged<WorkshopPaletteEditor?>? onPaletteEditorChanged;
+ 
+   @override
+   State<_LearningPathStepEditor> createState() =>
+@@ -664,6 +675,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+   late Set<String> _selectedRefs;
+   late final List<LearningPathNodeCallout> _callouts;
+   late final Set<String> _highlights;
++  late final Map<String, LearningPathPaletteCue> _paletteCues;
+   late List<LearningPathRequirement> _requirements;
+   late final String _initialForm;
+   bool _editingRule = false;
+@@ -681,6 +693,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+     _hint = TextEditingController(text: initial?.hint ?? '');
+     _callouts = List.of(initial?.callouts ?? const <LearningPathNodeCallout>[]);
+     _highlights = {...?initial?.highlights};
++    _paletteCues = {...?initial?.paletteCues};
+     _requirements = [...?initial?.requirements];
+     final savedStart = initial?.nodes
+         .where((node) => node.type == BlockType.eventGreenFlag)
+@@ -708,10 +721,32 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+         widget.onHighlightsChanged?.call(
+           _highlights.where(_isInteractionRef).toSet(),
+         );
++        _publishPaletteEditor();
+       }
+     });
+   }
+ 
++  void _publishPaletteEditor() {
++    widget.onPaletteEditorChanged?.call(
++      WorkshopPaletteEditor(
++        cues: Map.unmodifiable(_paletteCues),
++        onChanged: _setPaletteCue,
++      ),
++    );
++  }
++
++  void _setPaletteCue(String key, LearningPathPaletteCue? cue) {
++    if (!mounted) return;
++    setState(() {
++      if (cue == null) {
++        _paletteCues.remove(key);
++      } else {
++        _paletteCues[key] = cue;
++      }
++    });
++    _publishPaletteEditor();
++  }
++
+   @override
+   void dispose() {
+     _title.dispose();
+@@ -758,6 +793,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+     ],
+     _callouts.map((callout) => callout.toJson()).toList(),
+     _highlights.toList(),
++    _paletteCues.map((key, cue) => MapEntry(key, cue.name)),
+     _requirements.map((rule) => rule.toJson()).toList(),
+   ]);
+ 
+@@ -867,6 +903,16 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+                 ),
+               ),
+               const SizedBox(height: 10),
++              if (widget.onPaletteEditorChanged != null)
++                Padding(
++                  padding: const EdgeInsets.only(bottom: 8),
++                  child: Text(
++                    catalog.text('tutorial.studio.paletteHelp', {
++                      'count': _paletteCues.length,
++                    }),
++                    style: Theme.of(context).textTheme.bodySmall,
++                  ),
++                ),
+               ExpansionTile(
+                 tilePadding: EdgeInsets.zero,
+                 title: Text(catalog.text('tutorial.studio.hint')),
+@@ -1123,6 +1169,7 @@ class _LearningPathStepEditorState extends State<_LearningPathStepEditor> {
+           _callouts.where((callout) => _isInteractionRef(callout.targetRef)),
+         ),
+         highlights: List.unmodifiable(_highlights.where(_isInteractionRef)),
++        paletteCues: Map.unmodifiable(_paletteCues),
+         requirements: List.unmodifiable(_selectedRequirements),
+       ),
+     );
+diff --git a/lib/features/tutorial/workshop_admin_extension.dart b/lib/features/tutorial/workshop_admin_extension.dart
+index 29d083687e868909d8cc4f4cf70bffd52b4aaefd..5e7c09cc4c295132e7b1b72aa62c6dad020ef215 100644
+--- a/lib/features/tutorial/workshop_admin_extension.dart
++++ b/lib/features/tutorial/workshop_admin_extension.dart
+@@ -31,3 +31,27 @@ final workshopAuthoringProvider = StateProvider<bool>((_) => true);
+ final workshopAuthoringHighlightsProvider = StateProvider<Set<String>>(
+   (_) => const {},
+ );
++
++class WorkshopPaletteEditor {
++  const WorkshopPaletteEditor({required this.cues, required this.onChanged});
++
++  final Map<String, LearningPathPaletteCue> cues;
++  final void Function(String key, LearningPathPaletteCue? cue) onChanged;
++}
++
++class WorkshopPaletteEditingScope extends InheritedWidget {
++  const WorkshopPaletteEditingScope({
++    required this.onEditorChanged,
++    required super.child,
++    super.key,
++  });
++
++  final ValueChanged<WorkshopPaletteEditor?> onEditorChanged;
++
++  static WorkshopPaletteEditingScope? maybeOf(BuildContext context) =>
++      context.dependOnInheritedWidgetOfExactType<WorkshopPaletteEditingScope>();
++
++  @override
++  bool updateShouldNotify(WorkshopPaletteEditingScope oldWidget) =>
++      onEditorChanged != oldWidget.onEditorChanged;
++}
+diff --git a/lib/features/workbench/presentation/workbench_page.dart b/lib/features/workbench/presentation/workbench_page.dart
+index 0e2c75ab3491803aed385f6dae0d173a1eaa5dd4..deb7a167015389a7be442d0e36ff443bfc9e8665 100644
+--- a/lib/features/workbench/presentation/workbench_page.dart
++++ b/lib/features/workbench/presentation/workbench_page.dart
+@@ -22,6 +22,7 @@ import 'package:nodeql/features/workbench/presentation/engine/sql_compiler.dart'
+ import 'package:nodeql/features/workbench/presentation/engine/sql_to_nodes_compiler.dart';
+ import 'package:nodeql/features/workbench/presentation/engine/block_snap_diagnostics.dart';
+ import 'package:nodeql/features/workbench/presentation/engine/sql_labels.dart';
++import 'package:nodeql/features/workbench/presentation/engine/sql_palette_catalog.dart';
+ import 'package:nodeql/features/workbench/presentation/engine/sqlite_function_catalog.dart';
+ import 'package:nodeql/features/workbench/presentation/engine/sql_mode.dart';
+ import 'package:nodeql/features/workbench/presentation/engine/sql_notice_localizer.dart';
+@@ -3083,12 +3084,18 @@ class _WorkshopWorkspaceViewState
+   String? _creationWorkspaceJson;
+   SqlAbstractionMode? _creationMode;
+   Matrix4? _creationTransform;
++  final _paletteEditor = ValueNotifier<WorkshopPaletteEditor?>(null);
+   final _downloads = RemoteWorkshopRepository();
+ 
++  void _updatePaletteEditor(WorkshopPaletteEditor? editor) {
++    if (mounted) _paletteEditor.value = editor;
++  }
++
+   @override
+   void dispose() {
+     _transform.dispose();
+     _workspaceFocus.dispose();
++    _paletteEditor.dispose();
+     super.dispose();
+   }
+ 
+@@ -3289,32 +3296,43 @@ class _WorkshopWorkspaceViewState
+                               curve: Curves.easeOutQuart,
+                               alignment: Alignment.centerLeft,
+                               clipBehavior: Clip.hardEdge,
+-                              child: _Palette(
+-                                key: ValueKey<String>(
+-                                  'workshop-palette-'
+-                                  '${authoredPath?.id ?? practice?.mode.name ?? 'overview'}-'
+-                                  '${authoredPath == null ? practice?.stepIndex ?? 0 : _authoredStepIndex}-'
+-                                  '${authoredPath == null ? '' : '$_authoredNodeIndex-${_activeAuthoredNodeExists()}'}-'
+-                                  '${mode.name}',
++                              child: ValueListenableBuilder(
++                                valueListenable: _paletteEditor,
++                                builder: (context, editor, _) => _Palette(
++                                  key: ValueKey<String>(
++                                    'workshop-palette-'
++                                    '${authoredPath?.id ?? practice?.mode.name ?? 'overview'}-'
++                                    '${authoredPath == null ? practice?.stepIndex ?? 0 : _authoredStepIndex}-'
++                                    '${authoredPath == null ? '' : '$_authoredNodeIndex-${_activeAuthoredNodeExists()}'}-'
++                                    '${mode.name}',
++                                  ),
++                                  category: missing == null
++                                      ? _activeCategory
++                                      : _categoryForLearningNode(missing.type),
++                                  runtime: runtime,
++                                  mode: mode,
++                                  localeCode: localeCode,
++                                  catalog: catalog,
++                                  width: paletteWidth,
++                                  pluginEntries: const <PluginPaletteEntry>[],
++                                  guidedBlockType: guidedTarget?.type,
++                                  paletteCues: authoring
++                                      ? editor?.cues ?? const {}
++                                      : _authoredPreview
++                                      ? authoredStep?.paletteCues ?? const {}
++                                      : const {},
++                                  onPaletteCueChanged: authoring
++                                      ? editor?.onChanged
++                                      : null,
++                                  guidedLabel: guidedTarget == null
++                                      ? null
++                                      : _learningNodeGuide(
++                                          guidedTarget.type,
++                                          localeCode,
++                                          mode,
++                                        ).label,
++                                  onAdd: _addWorkshopNode,
+                                 ),
+-                                category: missing == null
+-                                    ? _activeCategory
+-                                    : _categoryForLearningNode(missing.type),
+-                                runtime: runtime,
+-                                mode: mode,
+-                                localeCode: localeCode,
+-                                catalog: catalog,
+-                                width: paletteWidth,
+-                                pluginEntries: const <PluginPaletteEntry>[],
+-                                guidedBlockType: guidedTarget?.type,
+-                                guidedLabel: guidedTarget == null
+-                                    ? null
+-                                    : _learningNodeGuide(
+-                                        guidedTarget.type,
+-                                        localeCode,
+-                                        mode,
+-                                      ).label,
+-                                onAdd: _addWorkshopNode,
+                               ),
+                             ),
+                             _ThrottledResizeHandle(
+@@ -3496,10 +3514,13 @@ class _WorkshopWorkspaceViewState
+                                     ),
+                                   ),
+                                 ),
+-                                child: adminPanelBuilder(
+-                                  context,
+-                                  ref,
+-                                  _tryCreatedWorkshop,
++                                child: WorkshopPaletteEditingScope(
++                                  onEditorChanged: _updatePaletteEditor,
++                                  child: adminPanelBuilder(
++                                    context,
++                                    ref,
++                                    _tryCreatedWorkshop,
++                                  ),
+                                 ),
+                               ),
+                             ),
+@@ -5462,16 +5483,6 @@ class _PluginRepositoriesView extends StatelessWidget {
+   }
+ }
+ 
+-enum SqlPaletteCategory {
+-  queryLanguage,
+-  dataTypes,
+-  dml,
+-  ddl,
+-  txn,
+-  database,
+-  plugins,
+-}
+-
+ class _PaletteItem {
+   const _PaletteItem({
+     required this.key,
+@@ -5591,6 +5602,8 @@ class _Palette extends StatefulWidget {
+     required this.onAdd,
+     this.guidedBlockType,
+     this.guidedLabel,
++    this.paletteCues = const {},
++    this.onPaletteCueChanged,
+     super.key,
+   });
+ 
+@@ -5604,6 +5617,9 @@ class _Palette extends StatefulWidget {
+   final void Function(BlockType type, Map<String, dynamic>? defaults) onAdd;
+   final BlockType? guidedBlockType;
+   final String? guidedLabel;
++  final Map<String, LearningPathPaletteCue> paletteCues;
++  final void Function(String key, LearningPathPaletteCue? cue)?
++  onPaletteCueChanged;
+ 
+   @override
+   State<_Palette> createState() => _PaletteState();
+@@ -5618,9 +5634,21 @@ class _PaletteState extends State<_Palette> {
+     final surfaceStyle = NodeQlSurfaceStyle.of(context);
+     final tileWidth = (widget.width - 32).clamp(160.0, 500.0);
+     final query = _query.trim().toLowerCase();
+-    final sourceBlocks = query.isEmpty
+-        ? _blocksForCategory(widget.category)
+-        : _allSearchableBlocks();
++    final editing = widget.onPaletteCueChanged != null;
++    bool focused(_PaletteItem block) =>
++        widget.paletteCues[block.key] == LearningPathPaletteCue.focus;
++    final categoryBlocks = _blocksForCategory(widget.category);
++    final categoryKeys = {for (final block in categoryBlocks) block.key};
++    final sourceBlocks = query.isNotEmpty
++        ? _allSearchableBlocks()
++        : [
++            ...categoryBlocks,
++            if (!editing &&
++                widget.paletteCues.containsValue(LearningPathPaletteCue.focus))
++              ..._allSearchableBlocks().where(
++                (block) => focused(block) && !categoryKeys.contains(block.key),
++              ),
++          ];
+     final blocks = query.isEmpty
+         ? sourceBlocks
+         : sourceBlocks
+@@ -5630,12 +5658,19 @@ class _PaletteState extends State<_Palette> {
+                     block.key.toLowerCase().contains(query);
+               })
+               .toList(growable: false);
+-    final orderedBlocks = widget.guidedBlockType == null
+-        ? blocks
+-        : [
+-            ...blocks.where((block) => block.type == widget.guidedBlockType),
+-            ...blocks.where((block) => block.type != widget.guidedBlockType),
+-          ];
++    bool guided(_PaletteItem block) => block.type == widget.guidedBlockType;
++    final orderedBlocks = [
++      ...blocks.where(guided),
++      if (!editing)
++        ...blocks.where((block) => !guided(block) && focused(block)),
++      ...blocks.where(
++        (block) => !guided(block) && (editing || !focused(block)),
++      ),
++    ];
++    final focusLabel = widget.catalog.text('tutorial.studio.paletteFocus');
++    final highlightLabel = widget.catalog.text(
++      'tutorial.studio.paletteHighlight',
++    );
+ 
+     return SizedBox(
+       width: widget.width,
+@@ -5712,34 +5747,82 @@ class _PaletteState extends State<_Palette> {
+           Expanded(
+             child: ListView(
+               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+-              children: orderedBlocks
+-                  .map(
+-                    (block) => Padding(
+-                      padding: const EdgeInsets.only(bottom: 10),
+-                      child: _PaletteCard(
+-                        paletteKey: block.key,
+-                        type: block.type,
+-                        label: block.label,
+-                        description: block.description,
+-                        color: block.color,
+-                        node: _templateNode(block.type, block.defaults),
+-                        languageCode: widget.localeCode,
+-                        mode: widget.mode,
+-                        width: tileWidth,
+-                        guided: block.type == widget.guidedBlockType,
+-                        guidedLabel: block.type == widget.guidedBlockType
+-                            ? widget.guidedLabel
+-                            : null,
+-                        onAdd: () => widget.onAdd(block.type, block.defaults),
+-                        onHelp: () => _showCommandHelp(
+-                          context,
+-                          block.label,
+-                          block.description,
+-                        ),
+-                      ),
++              children: orderedBlocks.map((block) {
++                final cue = widget.paletteCues[block.key];
++                final onCueChanged = widget.onPaletteCueChanged;
++                return Padding(
++                  padding: const EdgeInsets.only(bottom: 10),
++                  child: _PaletteCard(
++                    paletteKey: block.key,
++                    type: block.type,
++                    label: block.label,
++                    description: block.description,
++                    color: block.color,
++                    node: _templateNode(block.type, block.defaults),
++                    languageCode: widget.localeCode,
++                    mode: widget.mode,
++                    width: tileWidth,
++                    guided: guided(block),
++                    guidedLabel: guided(block) ? widget.guidedLabel : null,
++                    cue: cue,
++                    focusLabel: focusLabel,
++                    highlightLabel: highlightLabel,
++                    onAdd: () => widget.onAdd(block.type, block.defaults),
++                    onHelp: () => _showCommandHelp(
++                      context,
++                      block.label,
++                      block.description,
+                     ),
+-                  )
+-                  .toList(),
++                    cueMenu: onCueChanged == null
++                        ? null
++                        : PopupMenuButton<String>(
++                            key: ValueKey('workshop-palette-edit-${block.key}'),
++                            padding: EdgeInsets.zero,
++                            splashRadius: 16,
++                            tooltip: widget.catalog.text(
++                              'tutorial.studio.paletteEdit',
++                              {'node': block.label},
++                            ),
++                            icon: Icon(
++                              focused(block)
++                                  ? Icons.center_focus_strong
++                                  : cue == null
++                                  ? Icons.bookmark_add_outlined
++                                  : Icons.bookmark,
++                              size: 18,
++                            ),
++                            onSelected: (value) => onCueChanged(
++                              block.key,
++                              value == 'none'
++                                  ? null
++                                  : LearningPathPaletteCue.values.byName(value),
++                            ),
++                            itemBuilder: (context) => [
++                              CheckedPopupMenuItem(
++                                value: 'none',
++                                checked: cue == null,
++                                child: Text(
++                                  widget.catalog.text(
++                                    'tutorial.studio.paletteNone',
++                                  ),
++                                ),
++                              ),
++                              for (final option
++                                  in LearningPathPaletteCue.values)
++                                CheckedPopupMenuItem(
++                                  value: option.name,
++                                  checked: cue == option,
++                                  child: Text(
++                                    option == LearningPathPaletteCue.focus
++                                        ? focusLabel
++                                        : highlightLabel,
++                                  ),
++                                ),
++                            ],
++                          ),
++                  ),
++                );
++              }).toList(),
+             ),
+           ),
+         ],
+@@ -5760,17 +5843,17 @@ class _PaletteState extends State<_Palette> {
+       color: _colorForType(type),
+     );
+     _PaletteItem dataType(
+-      String storageClass,
++      SqlPaletteLiteralType literal,
+       String defaultValue,
+       String descriptionDe,
+       String descriptionEn,
+     ) {
+       final defaults = <String, dynamic>{
+-        'literal_type': storageClass,
++        'literal_type': literal.storageClass,
+         'text': defaultValue,
+       };
+       return _PaletteItem(
+-        key: 'sqlite.datatype.$storageClass',
++        key: literal.paletteKey,
+         type: BlockType.sqlText,
+         label: sqlLabelFor(
+           BlockType.sqlText,
+@@ -5785,102 +5868,38 @@ class _PaletteState extends State<_Palette> {
+     }
+ 
+     return switch (category) {
+-      SqlPaletteCategory.queryLanguage => <_PaletteItem>[
+-        native(BlockType.eventGreenFlag),
+-        native(BlockType.sqlSelect),
+-        native(BlockType.sqlFrom),
+-        native(BlockType.sqlWhere),
+-        native(BlockType.sqlAnd),
+-        native(BlockType.sqlOr),
+-        native(BlockType.sqlJoin),
+-        native(BlockType.sqlGroupBy),
+-        native(BlockType.sqlHaving),
+-        native(BlockType.sqlOrderBy),
+-        native(BlockType.sqlLimit),
+-        native(BlockType.sqlCount),
+-        native(BlockType.sqlSum),
+-        native(BlockType.sqlAvg),
+-        native(BlockType.sqlMin),
+-        native(BlockType.sqlMax),
+-        native(BlockType.sqlCase),
+-        native(BlockType.sqlSubqueryIn),
+-        native(BlockType.sqlUnion),
+-        native(BlockType.sqlIntersect),
+-        native(BlockType.sqlExcept),
+-        native(BlockType.sqlWith),
+-        native(BlockType.sqlValues),
+-        native(BlockType.sqlExplain),
+-      ],
+       SqlPaletteCategory.dataTypes => <_PaletteItem>[
+         dataType(
+-          'null',
++          SqlPaletteLiteralType.nullValue,
+           '',
+           'Der SQLite-NULL-Wert: kein Wert beziehungsweise unbekannt.',
+           'The SQLite NULL value: no value or an unknown value.',
+         ),
+         dataType(
+-          'integer',
++          SqlPaletteLiteralType.integer,
+           '1',
+           'Eine ganze Zahl ohne Nachkommastellen.',
+           'A whole number without decimal places.',
+         ),
+         dataType(
+-          'real',
++          SqlPaletteLiteralType.real,
+           '1.0',
+           'Eine Flie\u00dfkommazahl mit Nachkommastellen.',
+           'A floating-point number with decimal places.',
+         ),
+         dataType(
+-          'text',
++          SqlPaletteLiteralType.text,
+           'Text',
+           'Eine SQLite-Zeichenkette. Anf\u00fchrungszeichen werden beim Kompilieren sicher gesetzt.',
+           'A SQLite string. Quotes are added safely during compilation.',
+         ),
+         dataType(
+-          'blob',
++          SqlPaletteLiteralType.blob,
+           '00',
+           'Bin\u00e4rdaten als gerade Folge hexadezimaler Zeichen.',
+           'Binary data as an even-length sequence of hexadecimal characters.',
+         ),
+       ],
+-      SqlPaletteCategory.dml => <_PaletteItem>[
+-        native(BlockType.sqlInsert),
+-        native(BlockType.sqlInsertOrReplace),
+-        native(BlockType.sqlUpsert),
+-        native(BlockType.sqlUpdate),
+-        native(BlockType.sqlDelete),
+-      ],
+-      SqlPaletteCategory.ddl => <_PaletteItem>[
+-        native(BlockType.sqlCreateTable),
+-        native(BlockType.sqlCreateIndex),
+-        native(BlockType.sqlDropIndex),
+-        native(BlockType.sqlCreateView),
+-        native(BlockType.sqlDropView),
+-        native(BlockType.sqlCreateTrigger),
+-        native(BlockType.sqlDropTrigger),
+-        native(BlockType.sqlCreateVirtualTable),
+-        native(BlockType.sqlAlterTable),
+-        // SQLite has no TRUNCATE; this block executes as DELETE FROM.
+-        native(BlockType.sqlTruncate),
+-        native(BlockType.sqlDropTable),
+-      ],
+-      SqlPaletteCategory.txn => <_PaletteItem>[
+-        native(BlockType.sqlBeginTransaction),
+-        native(BlockType.sqlSavepoint),
+-        native(BlockType.sqlRollbackToSavepoint),
+-        native(BlockType.sqlReleaseSavepoint),
+-        native(BlockType.sqlCommit),
+-        native(BlockType.sqlEndTransaction),
+-        native(BlockType.sqlRollback),
+-      ],
+-      SqlPaletteCategory.database => <_PaletteItem>[
+-        native(BlockType.sqlPragma),
+-        native(BlockType.sqlAttachDatabase),
+-        native(BlockType.sqlDetachDatabase),
+-        native(BlockType.sqlVacuum),
+-        native(BlockType.sqlReindex),
+-        native(BlockType.sqlAnalyze),
+-      ],
+       SqlPaletteCategory.plugins =>
+         widget.pluginEntries
+             .map(
+@@ -5894,6 +5913,7 @@ class _PaletteState extends State<_Palette> {
+               ),
+             )
+             .toList(growable: false),
++      _ => sqlPaletteBlockTypes[category]!.map(native).toList(growable: false),
+     };
+   }
+ 
+@@ -6505,6 +6525,10 @@ class _PaletteCard extends StatelessWidget {
+     required this.width,
+     this.guided = false,
+     this.guidedLabel,
++    this.cue,
++    required this.focusLabel,
++    required this.highlightLabel,
++    this.cueMenu,
+     required this.onAdd,
+     required this.onHelp,
+   });
+@@ -6520,6 +6544,10 @@ class _PaletteCard extends StatelessWidget {
+   final double width;
+   final bool guided;
+   final String? guidedLabel;
++  final LearningPathPaletteCue? cue;
++  final String focusLabel;
++  final String highlightLabel;
++  final Widget? cueMenu;
+   final VoidCallback onAdd;
+   final VoidCallback onHelp;
+ 
+@@ -6597,14 +6625,20 @@ class _PaletteCard extends StatelessWidget {
+     final addsToWorkspace = !_isReporterDragData(
+       _PaletteDragData(type, node.inputs),
+     );
++    final focused = cue == LearningPathPaletteCue.focus;
++    final highlighted = guided || cue != null;
+ 
+-    return Draggable<_PaletteDragData>(
++    final card = Draggable<_PaletteDragData>(
+       key: ValueKey<String>('palette-draggable-$paletteKey'),
+       data: _PaletteDragData(type, node.inputs),
+       feedback: Material(color: Colors.transparent, child: block),
+       child: Semantics(
+         button: addsToWorkspace,
+-        label: '$label. $description',
++        label: [
++          label,
++          if (cue != null) focused ? focusLabel : highlightLabel,
++          description,
++        ].join('. '),
+         child: Material(
+           color: Colors.transparent,
+           child: InkWell(
+@@ -6618,30 +6652,34 @@ class _PaletteCard extends StatelessWidget {
+               width: width,
+               padding: const EdgeInsets.all(NodeQlDesign.space2),
+               decoration: surfaceStyle.surfaceDecoration(
+-                color: guided
++                color: guided || focused
+                     ? const Color(0xFF7C3AED).withValues(alpha: 0.18)
+                     : workbenchColors.panel,
+-                borderColor: guided
+-                    ? const Color(0xFFB9FF39)
++                borderColor: highlighted
++                    ? _workshopFocusColor
+                     : workbenchColors.border,
+               ),
+               child: Column(
+                 crossAxisAlignment: CrossAxisAlignment.start,
+                 children: [
+-                  if (guided) ...[
++                  if (guided || focused) ...[
+                     Container(
+-                      key: ValueKey<String>('guided-palette-$type'),
++                      key: ValueKey<String>(
++                        guided
++                            ? 'guided-palette-$type'
++                            : 'workshop-palette-focus-$paletteKey',
++                      ),
+                       margin: const EdgeInsets.only(bottom: 8),
+                       padding: const EdgeInsets.symmetric(
+                         horizontal: 8,
+                         vertical: 4,
+                       ),
+                       decoration: BoxDecoration(
+-                        color: const Color(0xFFB9FF39),
++                        color: _workshopFocusColor,
+                         borderRadius: BorderRadius.circular(8),
+                       ),
+                       child: Text(
+-                        'JETZT: ${guidedLabel ?? label}',
++                        guided ? 'JETZT: ${guidedLabel ?? label}' : focusLabel,
+                         style: const TextStyle(
+                           color: Color(0xFF171126),
+                           fontSize: 10,
+@@ -6714,6 +6752,14 @@ class _PaletteCard extends StatelessWidget {
+         ),
+       ),
+     );
++    if (cueMenu == null) return card;
++    return Row(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Expanded(child: card),
++        cueMenu!,
++      ],
++    );
+   }
+ 
+   double _palettePreviewWidth(String label, double cardWidth) {
+diff --git a/lib/localization/translation_controller.dart b/lib/localization/translation_controller.dart
+index 673257e3246df1b0903b42cf0712b30240a2f749..57e2ff119905eb04068bde4616f68b39c778cf7d 100644
+--- a/lib/localization/translation_controller.dart
++++ b/lib/localization/translation_controller.dart
+@@ -351,6 +351,12 @@ const builtInMessages = <String, Map<String, String>>{
+     'tutorial.action.summary':
+         'Prüfungen ({rules}) · Markierungen ({highlights})',
+     'tutorial.action.highlight': 'Nodes hervorheben',
++    'tutorial.studio.paletteHelp':
++        'Markiere oder fokussiere Nodes über das Menü an der Karte links ({count} markiert).',
++    'tutorial.studio.paletteEdit': 'Workshop-Markierung für {node}',
++    'tutorial.studio.paletteNone': 'Keine Markierung',
++    'tutorial.studio.paletteHighlight': 'Hervorheben',
++    'tutorial.studio.paletteFocus': 'Fokus',
+     'tutorial.action.waitHelp':
+         'Lege fest, was die Klasse tun muss, bevor es weitergeht.',
+     'tutorial.action.add': 'Prüfung hinzufügen',
+diff --git a/lib/features/workbench/presentation/engine/sql_palette_catalog.dart b/lib/features/workbench/presentation/engine/sql_palette_catalog.dart
+new file mode 100644
+index 0000000000000000000000000000000000000000..4988669709ee3ca5f8d08c750e6bc26c40669556
+--- /dev/null
++++ b/lib/features/workbench/presentation/engine/sql_palette_catalog.dart
+@@ -0,0 +1,98 @@
++import 'package:nodeql/engine/block/block_node.dart';
++
++enum SqlPaletteCategory {
++  queryLanguage,
++  dataTypes,
++  dml,
++  ddl,
++  txn,
++  database,
++  plugins,
++}
++
++const sqlPaletteBlockTypes = <SqlPaletteCategory, List<BlockType>>{
++  SqlPaletteCategory.queryLanguage: [
++    BlockType.eventGreenFlag,
++    BlockType.sqlSelect,
++    BlockType.sqlFrom,
++    BlockType.sqlWhere,
++    BlockType.sqlAnd,
++    BlockType.sqlOr,
++    BlockType.sqlJoin,
++    BlockType.sqlGroupBy,
++    BlockType.sqlHaving,
++    BlockType.sqlOrderBy,
++    BlockType.sqlLimit,
++    BlockType.sqlCount,
++    BlockType.sqlSum,
++    BlockType.sqlAvg,
++    BlockType.sqlMin,
++    BlockType.sqlMax,
++    BlockType.sqlCase,
++    BlockType.sqlSubqueryIn,
++    BlockType.sqlUnion,
++    BlockType.sqlIntersect,
++    BlockType.sqlExcept,
++    BlockType.sqlWith,
++    BlockType.sqlValues,
++    BlockType.sqlExplain,
++  ],
++  SqlPaletteCategory.dml: [
++    BlockType.sqlInsert,
++    BlockType.sqlInsertOrReplace,
++    BlockType.sqlUpsert,
++    BlockType.sqlUpdate,
++    BlockType.sqlDelete,
++  ],
++  SqlPaletteCategory.ddl: [
++    BlockType.sqlCreateTable,
++    BlockType.sqlCreateIndex,
++    BlockType.sqlDropIndex,
++    BlockType.sqlCreateView,
++    BlockType.sqlDropView,
++    BlockType.sqlCreateTrigger,
++    BlockType.sqlDropTrigger,
++    BlockType.sqlCreateVirtualTable,
++    BlockType.sqlAlterTable,
++    // SQLite has no TRUNCATE; this block executes as DELETE FROM.
++    BlockType.sqlTruncate,
++    BlockType.sqlDropTable,
++  ],
++  SqlPaletteCategory.txn: [
++    BlockType.sqlBeginTransaction,
++    BlockType.sqlSavepoint,
++    BlockType.sqlRollbackToSavepoint,
++    BlockType.sqlReleaseSavepoint,
++    BlockType.sqlCommit,
++    BlockType.sqlEndTransaction,
++    BlockType.sqlRollback,
++  ],
++  SqlPaletteCategory.database: [
++    BlockType.sqlPragma,
++    BlockType.sqlAttachDatabase,
++    BlockType.sqlDetachDatabase,
++    BlockType.sqlVacuum,
++    BlockType.sqlReindex,
++    BlockType.sqlAnalyze,
++  ],
++};
++
++enum SqlPaletteLiteralType {
++  nullValue('null'),
++  integer('integer'),
++  real('real'),
++  text('text'),
++  blob('blob');
++
++  const SqlPaletteLiteralType(this.storageClass);
++
++  final String storageClass;
++
++  String get paletteKey => 'sqlite.datatype.$storageClass';
++}
++
++final sqlPaletteCardKeys = Set<String>.unmodifiable({
++  for (final types in sqlPaletteBlockTypes.values)
++    for (final type in types) type.name,
++  for (final type in SqlPaletteLiteralType.values) type.paletteKey,
++});

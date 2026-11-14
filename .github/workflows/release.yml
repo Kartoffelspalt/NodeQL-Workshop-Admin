@@ -12,6 +12,7 @@ on:
       - 'pubspec.*'
       - 'nodeql-revision'
       - 'tool/bootstrap-nodeql.sh'
+      - 'tool/nodeql-patches/**'
       - '.github/workflows/release.yml'
   pull_request:
     paths:
@@ -23,6 +24,7 @@ on:
       - 'pubspec.*'
       - 'nodeql-revision'
       - 'tool/bootstrap-nodeql.sh'
+      - 'tool/nodeql-patches/**'
       - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:

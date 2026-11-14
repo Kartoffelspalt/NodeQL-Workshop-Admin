@@ -165,6 +165,34 @@ void main() {
       find.byKey(const ValueKey('learning-step-instruction')),
       'Enter customers in the table field.',
     );
+    Future<void> markPaletteCard(String key, String action) async {
+      final menu = find.byKey(ValueKey('workshop-palette-edit-$key'));
+      await tester.ensureVisible(menu);
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.ancestor(
+          of: find.text(action),
+          matching: find.byType(CheckedPopupMenuItem<String>),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await markPaletteCard('sqlFrom', 'Highlight');
+    await tester.tap(find.byTooltip('SQLite data types'));
+    await tester.pumpAndSettle();
+    await markPaletteCard('sqlite.datatype.integer', 'Focus');
+    final focus = find.byKey(
+      const ValueKey('workshop-palette-focus-sqlite.datatype.integer'),
+    );
+    expect(focus, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('workshop-palette-focus-sqlite.datatype.real')),
+      findsNothing,
+    );
+    await tester.tap(find.byTooltip('Query Language'));
+    await tester.pumpAndSettle();
     // A node added while a step is being edited is available without leaving the form.
     final select = workspace.addTemplate(
       BlockType.sqlSelect,
@@ -198,10 +226,44 @@ void main() {
     expect(tester.takeException(), isNull, reason: 'stage 7');
     expect(scope.read(workshopAuthoringProvider), isFalse);
     expect(find.byKey(const ValueKey('workshop-run-sqlite')), findsOneWidget);
+    expect(focus, findsOneWidget);
+    final fromCard = find.byKey(const ValueKey('palette-draggable-sqlFrom'));
+    expect(
+      tester.getTopLeft(focus).dy,
+      lessThan(tester.getTopLeft(fromCard).dy),
+    );
+    expect(
+      tester
+          .widgetList<Semantics>(
+            find.descendant(of: fromCard, matching: find.byType(Semantics)),
+          )
+          .any(
+            (widget) => widget.properties.label?.contains('Highlight') == true,
+          ),
+      isTrue,
+    );
+    expect(
+      find.byKey(const ValueKey('workshop-palette-edit-sqlFrom')),
+      findsNothing,
+    );
     expect(workspace.findById(select.id), isNull);
     expect(file.existsSync(), isTrue);
     final draft = library!.drafts.single;
     expect(draft.steps.single.nodes.single.ref, select.id);
+    const cues = {
+      'sqlFrom': LearningPathPaletteCue.highlight,
+      'sqlite.datatype.integer': LearningPathPaletteCue.focus,
+    };
+    expect(draft.steps.single.paletteCues, cues);
+    expect(
+      decodeLearningPathDraftBundle(
+        file.readAsStringSync(),
+      ).single.steps.single.paletteCues,
+      cues,
+    );
+    final shared = encodeLearningPathBundle([draft]);
+    expect(shared, isNot(contains('paletteCues')));
+    expect(jsonDecode(shared)['schemaVersion'], 1);
     expect(
       scope
           .read(tutorialControllerProvider)

@@ -13,6 +13,8 @@ Desktop-App zum Erstellen, Testen und Teilen interaktiver SQLite-Workshops mit
 Der Workshop Admin verwendet NodeQL als Flutter-Paket. Die Datei
 `nodeql-revision` hält den vollständigen Commit für reproduzierbare Builds fest.
 Das Setup holt ihn in das lokale Verzeichnis `.nodeql`.
+Es wendet dort auch `tool/nodeql-patches/workshop-palette.patch` für den
+Schritt-Editor und die Vorschau des Workshop Admin an.
 
 ```sh
 bash tool/bootstrap-nodeql.sh
@@ -24,6 +26,13 @@ flutter run -d macos
 Für Windows und Linux entsprechend `flutter run -d windows` oder
 `flutter run -d linux` verwenden. Die Release-Workflowdatei legt Flutter-Version
 und Plattformabhängigkeiten fest.
+
+## Nodes in der Palette markieren
+
+Beim Bearbeiten eines Schritts öffnet das Symbol neben einer Node-Karte das
+Menü **Hervorheben**, **Fokus** oder **Keine Markierung**. Ein fokussierter
+Node steht in der Vorschau oben in der Palette. Die Auswahl wird im lokalen
+Workshop-Entwurf gespeichert.
 
 ## Release vorbereiten
 
