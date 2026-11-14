@@ -193,19 +193,100 @@ void main() {
     );
     await tester.tap(find.byTooltip('Query Language'));
     await tester.pumpAndSettle();
-    // A node added while a step is being edited is available without leaving the form.
-    final select = workspace.addTemplate(
-      BlockType.sqlSelect,
-      workspace.suggestedTemplatePosition(BlockType.sqlSelect),
-      defaults: {'table': 'customers', 'columns': 'name'},
+    final interactions = find.byKey(
+      const ValueKey('learning-step-interactions'),
+    );
+    await tester.ensureVisible(interactions);
+    await tester.tap(interactions);
+    await tester.pumpAndSettle();
+    final addAction = find.byKey(const ValueKey('workshop-action-add'));
+    await tester.ensureVisible(addAction);
+    await tester.tap(addAction);
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const ValueKey('palette-draggable-sqlSelect')),
+      const Offset(285, 0),
     );
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull, reason: 'stage 4');
-    final useNodes = find.byKey(const ValueKey('learning-step-use-workspace'));
-    await tester.ensureVisible(useNodes);
-    await tester.tap(useNodes);
+    final select = workspace.allBlocks().singleWhere(
+      (node) => node.type == BlockType.sqlSelect,
+    );
+    expect(find.byKey(const ValueKey('workshop-action-kind')), findsOneWidget);
+    final overlay = find.byKey(const ValueKey('inline-option-overlay'));
+    await tester.tap(find.byKey(ValueKey('inline-slot-${select.id}-table')));
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull, reason: 'stage 5');
+    expect(overlay, findsOneWidget);
+    await tester.tap(
+      find.descendant(of: overlay, matching: find.text('customers')),
+    );
+    await tester.pumpAndSettle();
+    expect(overlay, findsNothing);
+    expect(select.inputs['table'], 'customers');
+
+    final editorScroll = find.descendant(
+      of: panel,
+      matching: find.byType(Scrollable),
+    );
+    final openRule = find.byKey(
+      const ValueKey('workshop-action-kind'),
+      skipOffstage: false,
+    );
+    await tester.scrollUntilVisible(openRule, 120, scrollable: editorScroll);
+    await tester.pumpAndSettle();
+
+    Future<void> chooseActionOption<T>(String key, T value) async {
+      final field = find.byKey(ValueKey(key));
+      await tester.ensureVisible(field);
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      await tester.tapAt(
+        tester.getCenter(
+          find
+              .byWidgetPredicate(
+                (widget) =>
+                    widget is DropdownMenuItem<T> && widget.value == value,
+              )
+              .last,
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await chooseActionOption(
+      'workshop-action-kind',
+      LearningPathAction.enterInput,
+    );
+    await chooseActionOption('workshop-action-node-enterInput', select.id);
+    await chooseActionOption(
+      'workshop-action-input-enterInput-${select.id}',
+      'table',
+    );
+    final applyAction = find.byKey(const ValueKey('workshop-action-apply'));
+    await tester.ensureVisible(applyAction);
+    await tester.tap(applyAction);
+    await tester.pumpAndSettle();
+
+    final filter = workspace.addTemplate(
+      BlockType.sqlWhere,
+      const Offset(350, 430),
+    );
+    await tester.pumpAndSettle();
+    final filterSlot = find.byKey(ValueKey('inline-slot-${filter.id}-column'));
+    await tester.tap(filterSlot);
+    await tester.pumpAndSettle();
+    expect(overlay, findsOneWidget);
+    await tester.tap(find.descendant(of: overlay, matching: find.text('city')));
+    await tester.pumpAndSettle();
+    expect(filter.inputs['column'], 'city');
+
+    await tester.tap(filterSlot);
+    await tester.pumpAndSettle();
+    expect(overlay, findsOneWidget);
+    workspace.updateInput(filter, 'value', 'Berlin');
+    await tester.pumpAndSettle();
+    expect(overlay, findsNothing);
+
     expect(find.byType(Dialog), findsNothing);
     await tester.tap(find.byKey(const ValueKey('learning-step-apply')));
     await tester.pumpAndSettle();
@@ -249,7 +330,13 @@ void main() {
     expect(workspace.findById(select.id), isNull);
     expect(file.existsSync(), isTrue);
     final draft = library!.drafts.single;
-    expect(draft.steps.single.nodes.single.ref, select.id);
+    final captured = {
+      for (final node in draft.steps.single.nodes) node.ref: node.defaults,
+    };
+    expect(captured[select.id]?['table'], 'customers');
+    expect(captured[filter.id]?['column'], 'city');
+    expect(captured[filter.id]?['value'], 'Berlin');
+    expect(draft.steps.single.requirements.single.nodeRef, select.id);
     const cues = {
       'sqlFrom': LearningPathPaletteCue.highlight,
       'sqlite.datatype.integer': LearningPathPaletteCue.focus,
@@ -263,7 +350,7 @@ void main() {
     );
     final shared = encodeLearningPathBundle([draft]);
     expect(shared, isNot(contains('paletteCues')));
-    expect(jsonDecode(shared)['schemaVersion'], 1);
+    expect(jsonDecode(shared)['schemaVersion'], 2);
     expect(
       scope
           .read(tutorialControllerProvider)
@@ -282,6 +369,7 @@ void main() {
     expect(workspace.allBlocks().map((node) => node.id).toSet(), {
       ...initialIds,
       select.id,
+      filter.id,
     });
     expect(workspace.findById(select.id)?.inputs['table'], 'customers');
     expect(

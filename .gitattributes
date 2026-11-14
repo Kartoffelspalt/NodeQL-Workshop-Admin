@@ -1,3 +1,4 @@
 *.pdf binary
 *.webp binary
 tool/nodeql-patches/*.patch text eol=lf
+tool/nodeql-patches/*.patch whitespace=-blank-at-eol
