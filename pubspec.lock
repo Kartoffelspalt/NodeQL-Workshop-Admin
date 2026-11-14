@@ -411,7 +411,7 @@ packages:
       path: ".nodeql"
       relative: true
     source: path
-    version: "0.5.2+13"
+    version: "0.5.3+524"
   objective_c:
     dependency: transitive
     description:
